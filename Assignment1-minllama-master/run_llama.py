@@ -216,10 +216,9 @@ def generate_sentence(args, prefix, outfile, max_new_tokens = 75, temperature = 
 				print(f"Temperature is {temperature}")
 				print(sentence)
 				print('---------------')
-				writer = open(outfile, 'w')
-				writer.write(sentence)
+				with open(outfile, "w", encoding="utf-8") as writer:
+					writer.write(sentence)
 				print(f"Wrote generated sentence to {outfile}.")
-				writer.close()
 
 def write_predictions_to_file(split: str, outfile: str, acc: float, pred: list[str], sents: list[str]):
 	with open(outfile, "w+") as f:

@@ -23,53 +23,39 @@ def reshape_for_broadcast(freqs_cis: torch.Tensor, x: torch.Tensor):
     shape = [d if i == 1 or i == ndim - 1 else 1 for i, d in enumerate(x.shape)]
     return freqs_cis.view(shape)
 
-def apply_rotary_emb(
-    query: torch.Tensor,
-    key: torch.Tensor,
-    head_dim: int,
-    max_seq_len: int,
-    theta: float = 10000.0,
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    """
-    Apply rotary embeddings to input tensors using the given frequency tensor.
+def apply_rotary_emb(q, k, head_dim, max_seq_len, base=10000.0):
+    device = q.device
+    bs, seqlen, _, _ = q.shape
 
-    This function applies rotary embeddings to the given query and key tensors. The rotation to each token
-    embedding is a function of that token's position in the sequence, head_dim, and theta.
-    The input tensors are reshaped as complex numbers to simplify your implementation.
+    pos = torch.arange(seqlen, device=device, dtype=torch.float32)
 
-    Args:
-        query (torch.Tensor): Query tensor to apply rotary embeddings.
-                              Shape: (batch_size, seqlen, n_local_heads, self.head_dim)
-        key (torch.Tensor): Key tensor to apply rotary embeddings.
-                              Shape: (batch_size, seqlen, n_local_kv_heads, self.head_dim)
-        head_dim (int): Dimension of each attention head.
-        max_seq_len (int): Maximum sequence length supported by model.
-    Returns:
-        Tuple[torch.Tensor, torch.Tensor]: Tuple of modified query tensor and key tensor with rotary embeddings.
-    """
+    inv_freq = 1.0 / (
+        base ** (torch.arange(0, head_dim, 2, device=device, dtype=torch.float32) / head_dim)
+    )
 
-    _, seqlen, _, _ = query.shape
-    device = query.device
-    # todo
-    #
-    # Please refer to slide 22 in https://phontron.com/class/anlp2024/assets/slides/anlp-05-transformers.pdf
-    # and Section 3 in https://arxiv.org/abs/2104.09864.
+    freqs = torch.einsum("s,d->sd", pos, inv_freq)  # (seqlen, head_dim/2)
 
-    # reshape xq and xk to match the complex representation
-    query_real, query_imag = query.float().reshape(query.shape[:-1] + (-1, 2)).unbind(-1)
-    key_real, key_imag = key.float().reshape(key.shape[:-1] + (-1, 2)).unbind(-1)
-    # This separates each query/key vector into its odd and even indices (assuming *one-indexing*).
-    # query_real contains q_1, q_3, q_5, ... and query_imag contains q_2, q_4, q_6, ...
+    # IMPORTANT: broadcast against q_even (head_dim/2), not q (head_dim)
+    q_even_ref = q[..., 0::2]
+    cos = reshape_for_broadcast(freqs.cos(), q_even_ref)
+    sin = reshape_for_broadcast(freqs.sin(), q_even_ref)
 
-    # First, compute the trigonometric values in the second and fourth columns in
-    # slide 22 (linked above).
+    q_even = q[..., 0::2]
+    q_odd  = q[..., 1::2]
+    k_even = k[..., 0::2]
+    k_odd  = k[..., 1::2]
 
-    # Then, combine these trigonometric values with the tensors query_real, query_imag,
-    # key_real, and key_imag.
+    q_rot_even = q_even * cos - q_odd * sin
+    q_rot_odd  = q_even * sin + q_odd * cos
+    k_rot_even = k_even * cos - k_odd * sin
+    k_rot_odd  = k_even * sin + k_odd * cos
 
-    raise NotImplementedError
+    q_out = torch.empty_like(q)
+    k_out = torch.empty_like(k)
 
-    query_out = None
-    key_out = None
-    # Return the rotary position embeddings for the query and key tensors
-    return query_out, key_out
+    q_out[..., 0::2] = q_rot_even
+    q_out[..., 1::2] = q_rot_odd
+    k_out[..., 0::2] = k_rot_even
+    k_out[..., 1::2] = k_rot_odd
+
+    return q_out, k_out
