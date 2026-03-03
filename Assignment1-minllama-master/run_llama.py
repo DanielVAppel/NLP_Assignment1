@@ -67,29 +67,37 @@ class LlamaDataset(Dataset):
 
 
 # create the data which is a list of (sentence, label, token for the labels)
-def create_data(filename, tokenizer: Tokenizer, flag: str ='train', lower: bool = False, eos: bool = True, prompt_suffix: Optional[str]=None):
-	# specify the tokenizer
-	num_labels = {}
-	data = []
+def create_data(
+    filename,
+    tokenizer: Tokenizer,
+    flag: str = 'train',
+    lower: bool = False,
+    eos: bool = True,
+    prompt_suffix: Optional[str] = None
+):
+    num_labels = {}
+    data = []
 
-	with open(filename, 'r') as fp:
-		for line in fp:
-			label, org_sent = line.split(' ||| ')
-			if lower:
-				org_sent = org_sent.lower()
-			sent = org_sent.strip()
-			if prompt_suffix is not None:
-				sent = f"{sent} {prompt_suffix}"
-			tokens = tokenizer.encode(sent, bos=True, eos=eos)
-			label = int(label.strip())
-			if label not in num_labels:
-				num_labels[label] = len(num_labels)
-			data.append((sent, label, tokens))
-	print(f"load {len(data)} data from {filename}")
-	if flag == 'train':
-		return data, len(num_labels)
-	else:
-		return data
+    #Windows UTF-8 reading
+    with open(filename, 'r', encoding='utf-8', errors='replace') as fp:
+        for line in fp:
+            label, org_sent = line.split(' ||| ')
+            if lower:
+                org_sent = org_sent.lower()
+            sent = org_sent.strip()
+            if prompt_suffix is not None:
+                sent = f"{sent} {prompt_suffix}"
+            tokens = tokenizer.encode(sent, bos=True, eos=eos)
+            label = int(label.strip())
+            if label not in num_labels:
+                num_labels[label] = len(num_labels)
+            data.append((sent, label, tokens))
+
+    print(f"load {len(data)} data from {filename}")
+    if flag == 'train':
+        return data, len(num_labels)
+    else:
+        return data
 
 # perform model evaluation in terms of the accuracy and f1 score.
 def model_eval(dataloader, model, device):
@@ -221,10 +229,11 @@ def generate_sentence(args, prefix, outfile, max_new_tokens = 75, temperature = 
 				print(f"Wrote generated sentence to {outfile}.")
 
 def write_predictions_to_file(split: str, outfile: str, acc: float, pred: list[str], sents: list[str]):
-	with open(outfile, "w+") as f:
-		print(f"{split} acc :: {acc :.3f}")
-		for s, p in zip(sents, pred):
-			f.write(f"{p} ||| {s}\n")
+    #Windows UTF-8 writing
+    with open(outfile, "w", encoding="utf-8") as f:
+        print(f"{split} acc :: {acc :.3f}")
+        for s, p in zip(sents, pred):
+            f.write(f"{p} ||| {s}\n")
 
 def test_with_prompting(args):
 	assert args.dev_out.endswith("dev-prompting-output.txt"), 'For saving prompting results, please set the dev_out argument as "<dataset>-dev-prompting-output.txt"'
@@ -236,7 +245,8 @@ def test_with_prompting(args):
 		#### Load data
 		# create the data and its corresponding datasets and dataloader
 		tokenizer = Tokenizer(args.max_sentence_len)
-		label_names = json.load(open(args.label_names, 'r'))
+		with open(args.label_names, 'r', encoding='utf-8') as f:
+			label_names = json.load(f)
 		_, num_labels = create_data(args.train, tokenizer, 'train')
 
 		#### Init model
@@ -275,7 +285,7 @@ def test(args):
 	assert args.test_out.endswith("test-finetuning-output.txt"), 'For saving finetuning results, please set the test_out argument as "<dataset>-test-finetuning-output.txt"'
 	with torch.no_grad():
 		device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
-		saved = torch.load(args.filepath)
+		saved = torch.load(args.filepath, weights_only=False)
 		config = saved['model_config']
 		model = LlamaEmbeddingClassifier(config)
 		model.load_state_dict(saved['model'])
